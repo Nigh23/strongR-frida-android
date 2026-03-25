@@ -71,9 +71,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: "${{ needs.check_version.outputs.FRIDA_VERSION }}"
-          release_name: "${{ needs.check_version.outputs.FRIDA_VERSION }}"
-          prerelease: false
+          tag_name: "${{ needs.check_version.outputs.FRIDA_VERSION }}-custom"
+
+          release_name: "${{ needs.check_version.outputs.FRIDA_VERSION }}-custom"
+
 
   android_build:
     runs-on: ubuntu-22.04

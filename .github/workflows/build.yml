@@ -72,7 +72,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: "${{ needs.check_version.outputs.FRIDA_VERSION }}-custom"
-
           release_name: "${{ needs.check_version.outputs.FRIDA_VERSION }}-custom"
 
 
@@ -120,7 +119,8 @@ jobs:
         git config --global user.email "${{ secrets.GIT_EMAIL }}"
         git clone ${{ secrets.PATCH_REPO }}
         export ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
-        git clone --recurse-submodules https://github.com/frida/frida
+        # ✅ 固定为 Frida 16.5.6 版本
+        git clone --recurse-submodules --branch 16.5.6 https://github.com/frida/frida
         cd frida
         for path in ../Patchs/strongR-frida/*
         do
@@ -258,6 +258,7 @@ jobs:
         asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86.gz'
         asset_content_type: application/octet-stream
         
+    # ✅ 修正了此处的文件名笔误（移除多余的 -arm）
     - name: Upload android x86_64 frida-inject for hluda
       uses: actions/upload-release-asset@v1.0.2
       env:
@@ -265,7 +266,7 @@ jobs:
       with:
         upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86_64/subprojects/frida-core/inject/frida-inject.gz'
-        asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm-x86_64.gz'
+        asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86_64.gz'
         asset_content_type: application/octet-stream
     
     - name: Upload android arm frida-gadget for hluda

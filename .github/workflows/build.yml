@@ -62,6 +62,9 @@ jobs:
     needs: check_version
     runs-on: ubuntu-22.04
     if: true
+    outputs:
+      # 直接输出 Release 上传地址，避免后续查询失败
+      upload_url: ${{ steps.createRelease.outputs.upload_url }}
     steps:
       - name: Get current time
         id: time
@@ -142,30 +145,6 @@ jobs:
           cd ..
         done
 
-    - name: Check release version
-      id: checkReleaseVersion
-      uses: actions/github-script@v3.1.0
-      with:
-        github-token: ${{secrets.GITHUB_TOKEN}}
-        script: |
-          try {
-            const releaseVersion = '${{ needs.check_version.outputs.FRIDA_VERSION }}'
-            const releaseResponse = await github.repos.getReleaseByTag({
-              owner: '${{ secrets.GIT_OWNER }}',
-              repo: '${{ secrets.GIT_REPO }}',
-              tag: "${{ needs.check_version.outputs.FRIDA_VERSION }}-${{ env.NOW }}"
-            })
-            const {
-              data: { id: releaseId, html_url: htmlUrl, upload_url: uploadUrl }
-            } = releaseResponse;
-            core.setOutput('id', releaseId);
-            core.setOutput('html_url', htmlUrl);
-            core.setOutput('upload_url', uploadUrl);
-            core.setOutput('version', releaseVersion);
-          } catch (e) {
-            core.setFailed(e.message);
-          }
-          
     - name: package build result for Android
       shell: bash
       run: |
@@ -184,12 +163,13 @@ jobs:
         gzip build-android-x86/subprojects/frida-core/lib/gadget/frida-gadget.so
         gzip build-android-x86_64/subprojects/frida-core/lib/gadget/frida-gadget.so
 
+    # 👇 所有上传步骤直接复用 create_release 的 upload_url，彻底解决 Not Found 问题
     - name: Upload android arm frida-server
       uses: actions/upload-release-asset@v1.0.2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm/subprojects/frida-core/server/frida-server.gz'
         asset_name: 'hluda-server-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm.gz'
         asset_content_type: application/octet-stream
@@ -199,7 +179,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/server/frida-server.gz'
         asset_name: 'hluda-server-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.gz'
         asset_content_type: application/octet-stream
@@ -209,7 +189,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86/subprojects/frida-core/server/frida-server.gz'
         asset_name: 'hluda-server-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86.gz'
         asset_content_type: application/octet-stream
@@ -219,7 +199,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86_64/subprojects/frida-core/server/frida-server.gz'
         asset_name: 'hluda-server-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86_64.gz'
         asset_content_type: application/octet-stream
@@ -229,7 +209,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm/subprojects/frida-core/inject/frida-inject.gz'
         asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm.gz'
         asset_content_type: application/octet-stream
@@ -239,7 +219,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/inject/frida-inject.gz'
         asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.gz'
         asset_content_type: application/octet-stream
@@ -249,7 +229,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86/subprojects/frida-core/inject/frida-inject.gz'
         asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86.gz'
         asset_content_type: application/octet-stream
@@ -259,7 +239,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86_64/subprojects/frida-core/inject/frida-inject.gz'
         asset_name: 'hluda-inject-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86_64.gz'
         asset_content_type: application/octet-stream
@@ -269,7 +249,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm/subprojects/frida-core/lib/gadget/frida-gadget.so.gz'
         asset_name: 'hluda-gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm.so.gz'
         asset_content_type: application/octet-stream
@@ -279,7 +259,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-arm64/subprojects/frida-core/lib/gadget/frida-gadget.so.gz'
         asset_name: 'hluda-gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-arm64.so.gz'
         asset_content_type: application/octet-stream
@@ -289,7 +269,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86/subprojects/frida-core/lib/gadget/frida-gadget.so.gz'
         asset_name: 'hluda-gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86.so.gz'
         asset_content_type: application/octet-stream
@@ -299,7 +279,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: '${{ steps.checkReleaseVersion.outputs.upload_url }}'
+        upload_url: '${{ needs.create_release.outputs.upload_url }}'
         asset_path: '${{ github.workspace }}/build-android-x86_64/subprojects/frida-core/lib/gadget/frida-gadget.so.gz'
         asset_name: 'hluda-gadget-${{ needs.check_version.outputs.FRIDA_VERSION }}-android-x86_64.so.gz'
         asset_content_type: application/octet-stream

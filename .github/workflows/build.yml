@@ -1,6 +1,7 @@
 name: frida-arm64-彻底过检版
 on:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -20,14 +21,21 @@ jobs:
           sudo apt-get install -y build-essential gcc-multilib flex bison ruby-dev
           sudo gem install fpm -v 1.11.0
           python3 -m pip install lief graphlib
+
       - name: Clone Frida 16.5.6
         run: |
           git clone --recurse-submodules --branch 16.5.6 https://github.com/frida/frida
-      - name: 终极去特征（干掉gmain/gdbus+全隐藏）
+
+      - name: 终极去特征（无报错·彻底过DNF检测）
         run: |
           cd frida
-          for f in $(grep -rl "27042\|frida\|gum\|gmain\|gdbus" \
-            subprojects/frida-core subprojects/frida-gum --include="*.c" --include="*.h"); do
+          # 只搜核心源码，跳过所有测试/构建目录，彻底解决sed报错
+          DIRS="subprojects/frida-core/src subprojects/frida-gum"
+          FILES=$(grep -rl "27042\|frida\|gum\|gmain\|gdbus" $DIRS \
+            --include="*.c" --include="*.h" \
+            --exclude-dir="releng" --exclude-dir="test" --exclude-dir="cases")
+
+          for f in $FILES; do
             sed -i 's/27042/52222/g' "$f"
             sed -i 's/frida-server/mt/g' "$f"
             sed -i 's/"frida"/"sys"/g' "$f"
@@ -36,22 +44,25 @@ jobs:
             sed -i 's/gum_/sys_/g' "$f"
             sed -i 's/"gum-js-loop"/"pool"/g' "$f"
             sed -i 's/"frida-thread"/"worker"/g' "$f"
-            sed -i 's/"gmain"/"system"/g' "$f"      # 关键
-            sed -i 's/"gdbus"/"service"/g' "$f"     # 关键
+            sed -i 's/"gmain"/"system"/g' "$f"
+            sed -i 's/"gdbus"/"service"/g' "$f"
             sed -i 's/"frida-agent"/"libsystem"/g' "$f"
           done
-          # 隐藏 RWX 内存特征
-          for f in $(find subprojects/frida-gum -name "gummemory.c"); do
-            sed -i 's/PROT_EXEC | PROT_WRITE/PROT_WRITE/g' "$f"
-          done
+
+          # 隐藏RWX内存高危特征
+          find subprojects/frida-gum -name "gummemory.c" -exec \
+          sed -i 's/PROT_EXEC | PROT_WRITE/PROT_WRITE/g' {} \;
+
       - name: Build arm64
         run: |
-          export ANDROID_NDK_ROOT=$ANDROID_NDK_PATH
-          mkdir build && cd build
+          export ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
+          mkdir build-android-arm64
+          cd build-android-arm64
           ../frida/configure --host=aarch64-linux-android
-          make -j$(nproc)
-      - name: Upload
+          make -j4
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frida-arm64-final
-          path: build/subprojects/frida-core/server/frida-server
+          name: frida-arm64-彻底过检版
+          path: build-android-arm64/subprojects/frida-core/server/frida-server

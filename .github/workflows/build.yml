@@ -1,4 +1,4 @@
-name: strongR-arm64-release
+name: frida-arm64-build
 
 on:
   workflow_dispatch:
@@ -27,18 +27,9 @@ jobs:
           sudo gem install fpm -v 1.11.0 --no-document
           python3 -m pip install lief graphlib
 
-      - name: Clone patch & frida 16.5.6
+      - name: Clone Frida 16.5.6
         run: |
-          git clone https://github.com/strongR-frida/strongR-frida.git Patchs
           git clone --recurse-submodules --branch 16.5.6 https://github.com/frida/frida
-          cd frida
-          for mod in ../Patchs/*; do
-            name=$(basename $mod)
-            [ -d "subprojects/$name" ] || continue
-            cd subprojects/$name
-            git am --3way ../../$mod/*.patch || true
-            cd ../..
-          done
 
       - name: Build arm64
         run: |
@@ -50,14 +41,8 @@ jobs:
           cd ..
           gzip build-android-arm64/subprojects/frida-core/server/frida-server
 
-      - name: Create tag & release
-        run: echo "TAG=strongR-16.5.6-arm64-$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
-
-      - name: Upload to release
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload to artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ env.TAG }}
-          name: strongR-frida-arm64
-          files: build-android-arm64/subprojects/frida-core/server/frida-server.gz
+          name: frida-server-arm64
+          path: build-android-arm64/subprojects/frida-core/server/frida-server.gz

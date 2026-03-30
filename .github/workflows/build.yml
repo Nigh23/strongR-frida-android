@@ -7,33 +7,23 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r25b
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9"
-      - name: Install tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential gcc-multilib flex bison ruby-dev
-          sudo gem install fpm -v 1.11.0
-          python3 -m pip install lief graphlib
 
-      - name: Clone Frida 16.5.6
+      - name: 安装编译依赖
         run: |
-          git clone --recurse-submodules --branch 16.5.6 https://github.com/frida/frida
+          sudo apt update
+          sudo apt install -y build-essential gcc-multilib clang lib32stdc++6 git curl flex bison
 
-      - name: 终极去特征（无报错·彻底过DNF检测）
+      - name: 克隆Frida 16.5.6
+        run: |
+          git clone --depth 1 --branch 16.5.6 https://github.com/frida/frida.git
+          cd frida
+          git submodule update --init --recursive --depth 1
+
+      - name: 终极去特征（干掉gmain/gdbus+隐藏RWX）
         run: |
           cd frida
-          # 只搜核心源码，跳过所有测试/构建目录，彻底解决sed报错
           DIRS="subprojects/frida-core/src subprojects/frida-gum"
-          FILES=$(grep -rl "27042\|frida\|gum\|gmain\|gdbus" $DIRS \
-            --include="*.c" --include="*.h" \
-            --exclude-dir="releng" --exclude-dir="test" --exclude-dir="cases")
+          FILES=$(find $DIRS -type f \( -name "*.c" -o -name "*.h" \) | xargs grep -l "27042\|frida\|gum\|gmain\|gdbus" 2>/dev/null)
 
           for f in $FILES; do
             sed -i 's/27042/52222/g' "$f"
@@ -49,20 +39,17 @@ jobs:
             sed -i 's/"frida-agent"/"libsystem"/g' "$f"
           done
 
-          # 隐藏RWX内存高危特征
-          find subprojects/frida-gum -name "gummemory.c" -exec \
-          sed -i 's/PROT_EXEC | PROT_WRITE/PROT_WRITE/g' {} \;
+          # 隐藏RWX内存特征
+          find subprojects/frida-gum -name "gummemory.c" -exec sed -i 's/PROT_EXEC | PROT_WRITE/PROT_WRITE/g' {} \;
 
-      - name: Build arm64
+      - name: 编译arm64版本
         run: |
-          export ANDROID_NDK_ROOT=${{ steps.setup-ndk.outputs.ndk-path }}
-          mkdir build-android-arm64
-          cd build-android-arm64
-          ../frida/configure --host=aarch64-linux-android
-          make -j4
+          cd frida
+          ./configure --host=aarch64-linux-android
+          make -j$(nproc)
 
-      - name: Upload artifact
+      - name: 上传编译产物
         uses: actions/upload-artifact@v4
         with:
           name: frida-arm64-彻底过检版
-          path: build-android-arm64/subprojects/frida-core/server/frida-server
+          path: frida/build/frida-server-16.5.6-android-arm64

@@ -1,49 +1,60 @@
-name: frida-arm64-最终过检版
-on:
-  workflow_dispatch
+name: Build StrongR-Frida
+on: [push, pull_request]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-android:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
-      # 1. 安装编译器+依赖（彻底解决no C compiler found）
-      - name: 安装编译环境
+      
+      - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential clang gcc-multilib git libc6-dev
-
-      # 2. 克隆Frida 16.5.6（官方稳定版）
-      - name: 克隆Frida
+          sudo apt install -y build-essential git python3 python3-pip ninja-build meson llvm lld
+          pip3 install --upgrade pip setuptools wheel
+          
+      - name: Clone Frida with Submodules
         run: |
-          git clone --depth 1 -b 16.5.6 https://github.com/frida/frida.git
+          git clone --depth 1 --recursive -b 16.5.6 https://github.com/frida/frida.git
           cd frida
-          git submodule update --init --recursive --depth 1 releng frida-gum frida-core
-
-      # 3. 极简关键修改（只改4个文件，绝不报错，解决非法核心问题）
-      - name: 深度隐藏修改（干掉gmain/gdbus+隐藏特征）
-        run: |
-          cd frida
-          # 仅修改存在的核心文件，跳过不存在的
-          # 修改gum线程名（干掉gmain/gdbus核心检测点）
-          sed -i 's/"gmain"/"sys_daemon"/g' subprojects/frida-gum/gum/gum-main.c 2>/dev/null || true
-          sed -i 's/"gdbus"/"sys_service"/g' subprojects/frida-gum/gum/gum-main.c 2>/dev/null || true
-          sed -i 's/"gum-js-loop"/"worker_pool"/g' subprojects/frida-gum/gum/gum-thread.c 2>/dev/null || true
-          # 修改默认端口27042→55555
-          sed -i 's/27042/55555/g' subprojects/frida-core/server/server.c 2>/dev/null || true
-          # 隐藏RWX内存高危特征
-          sed -i 's/PROT_EXEC | PROT_WRITE/PROT_WRITE/g' subprojects/frida-gum/gum/gum-memory.c 2>/dev/null || true
-
-      # 4. 用Frida官方编译脚本（彻底解决编译失败问题）
-      - name: 编译arm64安卓版
+          git submodule update --init --recursive --depth 1  # 关键：拉子模块
+          
+      - name: Apply StrongR Patches
         run: |
           cd frida
-          ./releng/build-android.py --arch arm64
-
-      # 5. 上传编译好的最终文件
-      - name: 上传产物
+          # 只改核心文件，避免踩坑
+          FILES=(
+            subprojects/frida-gum/gum/gum-main.c
+            subprojects/frida-gum/gum/gum-thread.c
+            subprojects/frida-core/server/server.c
+            subprojects/frida-core/pipe/pipe.c
+          )
+          for f in "${FILES[@]}"; do
+            [ -f "$f" ] || continue
+            sed -i 's/27042/52222/g' "$f"
+            sed -i 's/"gum-js-loop"/"pool"/g' "$f"
+            sed -i 's/"gmain"/"system"/g' "$f"
+            sed -i 's/"gdbus"/"service"/g' "$f"
+            sed -i 's/frida-server/mt/g' "$f"
+          done
+          # 隐藏 RWX 内存
+          find subprojects/frida-gum -name gummemory.c -exec sed -i 's/PROT_EXEC|PROT_WRITE/PROT_WRITE/g' {} \;
+          
+      - name: Build Frida Server
+        run: |
+          cd frida
+          # 设置 Android 交叉编译环境
+          export FRIDA_HOST=android
+          export FRIDA_ARCHS=arm64
+          export CC=clang
+          export CXX=clang++
+          export CFLAGS="-fPIC"
+          export CXXFLAGS="-fPIC"
+          # 编译
+          python3 build.py build --configuration release --target android-arm64
+          
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frida-server-arm64-过检版
-          path: frida/build/frida-server-16.5.6-android-arm64
+          name: strongr-frida-server-android-arm64
+          path: frida/build/frida-server-android-arm64

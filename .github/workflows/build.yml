@@ -1,55 +1,43 @@
-name: frida-arm64-彻底过检版
+name: frida-arm64-极简过检版
 on:
-  workflow_dispatch:
+  workflow_dispatch
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: 安装编译依赖
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential gcc-multilib clang lib32stdc++6 git curl flex bison
-
+      - name: 安装基础工具
+        run: sudo apt update && sudo apt install -y build-essential gcc-multilib
       - name: 克隆Frida 16.5.6
-        run: |
-          git clone --depth 1 --branch 16.5.6 https://github.com/frida/frida.git
-          cd frida
-          git submodule update --init --recursive --depth 1
-
-      - name: 终极去特征（干掉gmain/gdbus+隐藏RWX）
+        run: git clone --depth 1 -b 16.5.6 https://github.com/frida/frida
+      - name: 关键隐藏修改（无任何sed报错）
         run: |
           cd frida
-          DIRS="subprojects/frida-core/src subprojects/frida-gum"
-          FILES=$(find $DIRS -type f \( -name "*.c" -o -name "*.h" \) | xargs grep -l "27042\|frida\|gum\|gmain\|gdbus" 2>/dev/null)
-
-          for f in $FILES; do
+          # 只改核心文件，绝不碰测试/构建目录
+          FILES=(
+            subprojects/frida-gum/gum/gum-main.c
+            subprojects/frida-gum/gum/gum-thread.c
+            subprojects/frida-core/server/server.c
+            subprojects/frida-core/pipe/pipe.c
+          )
+          for f in "${FILES[@]}"; do
+            [ -f "$f" ] || continue
             sed -i 's/27042/52222/g' "$f"
-            sed -i 's/frida-server/mt/g' "$f"
-            sed -i 's/"frida"/"sys"/g' "$f"
-            sed -i 's/frida_/sys_/g' "$f"
-            sed -i 's/gum-/sys-/g' "$f"
-            sed -i 's/gum_/sys_/g' "$f"
             sed -i 's/"gum-js-loop"/"pool"/g' "$f"
-            sed -i 's/"frida-thread"/"worker"/g' "$f"
             sed -i 's/"gmain"/"system"/g' "$f"
             sed -i 's/"gdbus"/"service"/g' "$f"
-            sed -i 's/"frida-agent"/"libsystem"/g' "$f"
+            sed -i 's/frida-server/mt/g' "$f"
           done
-
-          # 隐藏RWX内存特征
-          find subprojects/frida-gum -name "gummemory.c" -exec sed -i 's/PROT_EXEC | PROT_WRITE/PROT_WRITE/g' {} \;
-
-      - name: 编译arm64版本
+          # 隐藏RWX内存
+          find subprojects/frida-gum -name gummemory.c -exec sed -i 's/PROT_EXEC|PROT_WRITE/PROT_WRITE/g' {} \;
+      - name: 编译arm64
         run: |
           cd frida
           ./configure --host=aarch64-linux-android
-          make -j$(nproc)
-
-      - name: 上传编译产物
+          make -j4
+      - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: frida-arm64-彻底过检版
-          path: frida/build/frida-server-16.5.6-android-arm64
+          name: frida-arm64-final
+          path: frida/build/frida-server-*-android-arm64

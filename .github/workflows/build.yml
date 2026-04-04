@@ -1,92 +1,219 @@
-name: Build StrongR-Frida (Ultimate)
+name: Build StrongR-Frida (Aggressive)
 
 on:
   workflow_dispatch:
-  push:
-  pull_request:
+    inputs:
+      frida_version:
+        description: 'Frida version (tag)'
+        required: true
+        default: '16.5.6'
+      custom_port:
+        description: 'Custom server port'
+        required: false
+        default: '52222'
 
 jobs:
   build-android:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y \
             git python3 python3-pip \
             build-essential ninja-build meson \
-            clang lld unzip curl
+            clang lld llvm unzip curl wget \
+            pkg-config libglib2.0-dev \
+            binutils-multiarch objcopy \
+            xxd hexdump
+          pip3 install --upgrade pip
+          pip3 install keystone-engine capstone pwntools
 
-          pip3 install --upgrade pip setuptools wheel
-
-      # ✅ 下载 Android NDK（关键）
       - name: Setup Android NDK
         run: |
-          wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
-          unzip android-ndk-r25c-linux.zip
+          echo "[*] Downloading Android NDK r25c..."
+          wget -q https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
+          unzip -q android-ndk-r25c-linux.zip
           echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r25c" >> $GITHUB_ENV
+          echo "[+] NDK ready"
 
-      # ✅ 拉 Frida 源码（带子模块）
-      - name: Clone Frida
+      - name: Clone Frida Source
         run: |
-          git clone --depth 1 --recursive -b 16.5.6 https://github.com/frida/frida.git
+          echo "[*] Cloning Frida ${{ github.event.inputs.frida_version }}..."
+          git clone --depth 1 --branch ${{ github.event.inputs.frida_version }} --recursive https://github.com/frida/frida.git
           cd frida
           git submodule update --init --recursive --depth 1
+          echo "[+] Source cloned"
 
-      # 🔥 核心：隐藏 Frida 特征
-      - name: Apply StrongR Patch
+      # ==================== 激进修改开始 ====================
+      - name: Aggressive Patching - Source Code
         run: |
           cd frida
+          echo "[*] Applying aggressive patches (high risk)..."
 
-          echo "[*] Patching strings..."
+          # 1. 修改线程名（可能导致卡顿）
+          find subprojects -type f \( -name "*.c" -o -name "*.h" -o -name "*.vala" \) -print0 | xargs -0 sed -i \
+            -e 's/"gmain"/"wmain"/g' \
+            -e 's/"gdbus"/"wdbus"/g' \
+            -e 's/"gum-js-loop"/"wmloopxloop"/g' \
+            -e 's/"gum-js"/"wmjs"/g' \
+            -e 's/"gthread"/"wthread"/g' \
+            -e 's/"gspawn"/"wspawn"/g'
 
-          # 线程名 / server / agent
-          find subprojects -type f -name "*.c" -o -name "*.vala" -exec sed -i \
-            -e 's/"gum-js-loop"/"pool"/g' \
-            -e 's/"gmain"/"system"/g' \
-            -e 's/"gdbus"/"service"/g' \
-            -e 's/frida-agent/myagent/g' \
-            -e 's/frida-helper/myhelper/g' \
-            -e 's/frida-server/mt/g' \
-            {} \;
+          # 2. 修改进程名和 agent 名（长度保持）
+          find subprojects -type f \( -name "*.c" -o -name "*.vala" \) -print0 | xargs -0 sed -i \
+            -e 's/"frida-server"/"myapp-svr"/g' \
+            -e 's/"frida-agent"/"myagent"/g' \
+            -e 's/"frida-helper"/"myhelper"/g' \
+            -e 's/"frida-gadget"/"mygadget"/g' \
+            -e 's/"frida-portal"/"myportal"/g' \
+            -e 's/"frida-inject"/"myinject"/g' \
+            -e 's/"frida-ctrl"/"myctrl"/g'
 
-          # D-Bus 路径
-          find subprojects -type f -exec sed -i \
-            's#/re/frida/#/re/myapp/#g' {} \;
+          # 3. 修改环境变量名
+          find subprojects -type f -name "*.c" -print0 | xargs -0 sed -i \
+            -e 's/"FRIDA_AGENT"/"MYAPP_AGENT"/g' \
+            -e 's/"FRIDA_SERVER"/"MYAPP_SERVER"/g' \
+            -e 's/"FRIDA_HELPER"/"MYAPP_HELPER"/g'
 
-          # 默认端口
-          find subprojects -type f -exec sed -i \
-            's/27042/52222/g' {} \;
+          # 4. 修改 D-Bus 服务名和路径
+          find subprojects -type f \( -name "*.c" -o -name "*.vala" -o -name "*.xml" \) -print0 | xargs -0 sed -i \
+            -e 's/"re\.frida\.server"/"re.myapp.server"/g' \
+            -e 's/"re\.frida"/"re.myapp"/g' \
+            -e 's#"org\.freedesktop\.DBus"#"org.myapp.Bus"#g' \
+            -e 's#"/re/frida"#"/re/myapp"#g' \
+            -e 's#"frida:rpc"#"myrpc:api"#g' \
+            -e 's#"frida:auth"#"myrpc:auth"#g'
 
-          # RWX 内存隐藏
-          find subprojects/frida-gum -name gummemory.c -exec sed -i \
-            's/PROT_EXEC|PROT_WRITE/PROT_WRITE/g' {} \;
+          # 5. 修改端口
+          find subprojects -type f \( -name "*.c" -o -name "*.h" \) -print0 | xargs -0 sed -i \
+            -e 's/27042/${{ github.event.inputs.custom_port }}/g' \
+            -e 's/27043/${{ github.event.inputs.custom_port + 1 }}/g'
 
-          echo "[+] Patch Done"
+          # 6. 修改函数名前缀（高风险！需要同步修改符号导出）
+          # 先修改源代码中的函数名
+          find subprojects -type f -name "*.c" -print0 | xargs -0 sed -i \
+            -e 's/\bfrida_/myapp_/g' \
+            -e 's/\bgum_/app_/g' \
+            -e 's/\bFRIDA_/MYAPP_/g' \
+            -e 's/\bGUM_/APP_/g'
+          
+          # 修改头文件中的声明
+          find subprojects -type f -name "*.h" -print0 | xargs -0 sed -i \
+            -e 's/\bfrida_/myapp_/g' \
+            -e 's/\bgum_/app_/g'
 
-      # 🔥 编译（关键修复点）
-      - name: Build Frida (Android ARM64)
+          # 7. 修改错误消息中的特征字符串
+          find subprojects -type f -name "*.c" -print0 | xargs -0 sed -i \
+            -e 's/"Frida"/"MyApp"/g' \
+            -e 's/"frida"/"myapp"/g' \
+            -e 's/"FRIDA"/"MYAPP"/g' \
+            -e 's/"Frida: "/"MyApp: "/g' \
+            -e 's/"frida-"/"myapp-"/g'
+
+          # 8. 修改版本信息（可选）
+          find subprojects -type f -name "meson.build" -print0 | xargs -0 sed -i \
+            -e "s/version: '16.5.6'/version: '16.6.0'/g"
+
+          echo "[+] Aggressive patching done (high risk)"
+
+      # ==================== 编译 ====================
+      - name: Build Frida Server for Android ARM64
         run: |
           cd frida
-
           export ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
-
-          echo "[*] Configure build..."
-
-          # ⚠️ 正确方式：用 meson
+          export CC=aarch64-linux-android21-clang
+          export CXX=aarch64-linux-android21-clang++
+          # 由于修改了函数名，需要额外链接选项
+          export LDFLAGS="-Wl,--allow-multiple-definition"
+          echo "[*] Configuring build..."
           meson setup build \
             --cross-file subprojects/frida-core/releng/meson/android-arm64.txt \
-            --buildtype=release
+            --buildtype=release \
+            -Ddefault_library=shared \
+            -Denable_glib_support=true \
+            -Denable_tests=false \
+            -Denable_docs=false
+          echo "[*] Building frida-server..."
+          ninja -C build frida-server
+          echo "[+] Build completed"
 
-          echo "[*] Building..."
-
-          ninja -C build
-
-      # 📦 输出 frida-server
-      - name: Collect Artifacts
+      - name: Binary Patch (Aggressive)
         run: |
+          cd frida
+          FRIDA_SERVER=$(find build -name "frida-server" -type f | head -1)
+          echo "[*] Binary patching $FRIDA_SERVER"
+          python3 << 'EOF'
+          import sys
+          def patch_binary(filepath):
+              with open(filepath, 'rb') as f:
+                  data = bytearray(f.read())
+              patches = [
+                  (b'frida:rpc', b'myrpc:api'),
+                  (b'frida:auth', b'myrpc:auth'),
+                  (b're.frida', b're.myapp'),
+                  (b'HostSession', b'MySessionXX'),
+                  (b'REJECT', b'DENIED'),
+                  (b'REJECTED', b'DENIEDED'),
+                  (b'27042', b'52222'),
+                  (b'27043', b'52223'),
+                  (b'frida-server', b'myapp-svr'),
+                  (b'frida-agent', b'myagent--'),
+                  (b'gmain', b'wmain'),
+                  (b'gdbus', b'wdbus'),
+                  (b'gum-js-loop', b'wmloopxloop'),
+              ]
+              total = 0
+              for old, new in patches:
+                  if len(old) != len(new):
+                      print(f"WARN: length mismatch {old} {len(old)} vs {new} {len(new)}")
+                      continue
+                  cnt = data.count(old)
+                  if cnt:
+                      data = data.replace(old, new)
+                      total += cnt
+                      print(f"  Replaced {old} -> {new} ({cnt} times)")
+              with open(filepath, 'wb') as f:
+                  f.write(data)
+              return total
+          total = patch_binary("$FRIDA_SERVER")
+          print(f"[+] Binary patched: {total} replacements")
+          EOF
+          # 去除符号表
+          aarch64-linux-gnu-strip --strip-all "$FRIDA_SERVER" 2>/dev/null || true
+          echo "[+] Binary patch done"
+
+      - name: Prepare Artifacts
+        run: |
+          cd frida
+          mkdir -p artifacts
+          FRIDA_SERVER=$(find build -name "frida-server" -type f | head -1)
+          cp "$FRIDA_SERVER" artifacts/frida-server-custom
+          echo "Custom frida-server (port ${{ github.event.inputs.custom_port }})" > artifacts/README.txt
+          echo "⚠️  Aggressive modifications applied: thread names, function prefixes, D-Bus paths." >> artifacts/README.txt
+          echo "Use with: adb forward tcp:${{ github.event.inputs.custom_port }} tcp:${{ github.event.inputs.custom_port }}" >> artifacts/README.txt
+          echo "Start server: ./frida-server-custom -l 0.0.0.0:${{ github.event.inputs.custom_port }}" >> artifacts/README.txt
+
+      - name: Patch Python Client (Aggressive)
+        run: |
+          git clone --depth 1 --branch ${{ github.event.inputs.frida_version }} https://github.com/frida/frida-python.git
+          cd frida-python
+          # 激进修改 client
+          sed -i 's/"frida:rpc"/"myrpc:api"/g' frida/core.py
+          sed -i 's/"frida:auth"/"myrpc:auth"/g' frida/core.py
+          sed -i 's/"re\.frida"/"re.myapp"/g' frida/core.py
+          sed -i 's/"HostSession"/"MySessionXX"/g' frida/core.py
+          sed -i 's/27042/${{ github.event.inputs.custom_port }}/g' frida/core.py
+          sed -i 's/"frida"/"myapp"/g' frida/core.py
+          sed -i 's/"Frida"/"MyApp"/g' frida/core.py
+          python3 setup.py bdist_wheel
+          cp dist/*.whl ../artifacts/
+          echo "[+] Custom Python client wheel created"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: strongr-frida-aggressive
+          path: frida/artifacts/

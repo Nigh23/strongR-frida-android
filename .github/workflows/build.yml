@@ -1,70 +1,92 @@
-name: Build StrongR-Frida
+name: Build StrongR-Frida (Ultimate)
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
 
 jobs:
   build-android:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y build-essential git python3 python3-pip ninja-build meson llvm lld unzip wget
+          sudo apt install -y \
+            git python3 python3-pip \
+            build-essential ninja-build meson \
+            clang lld unzip curl
+
           pip3 install --upgrade pip setuptools wheel
 
-      # ✅ 安装 Android NDK（关键）
-      - name: Install Android NDK
+      # ✅ 下载 Android NDK（关键）
+      - name: Setup Android NDK
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip android-ndk-r25c-linux.zip
           echo "ANDROID_NDK_ROOT=$PWD/android-ndk-r25c" >> $GITHUB_ENV
 
+      # ✅ 拉 Frida 源码（带子模块）
       - name: Clone Frida
         run: |
-          git clone --recursive https://github.com/frida/frida.git
+          git clone --depth 1 --recursive -b 16.5.6 https://github.com/frida/frida.git
           cd frida
-          git checkout 16.5.6
+          git submodule update --init --recursive --depth 1
 
-      # ✅ 安全隐藏 Patch（不会破协议）
-      - name: Apply StrongR Patches
+      # 🔥 核心：隐藏 Frida 特征
+      - name: Apply StrongR Patch
         run: |
           cd frida
 
-          # ===== 线程名隐藏 =====
-          find subprojects/frida-gum -name "*.c" -exec sed -i 's/gum-js-loop/worker/g' {} \;
-          find subprojects/frida-gum -name "*.c" -exec sed -i 's/gmain/system/g' {} \;
-          find subprojects/frida-gum -name "*.c" -exec sed -i 's/gdbus/service/g' {} \;
+          echo "[*] Patching strings..."
 
-          # ===== RWX 内存隐藏 =====
-          find subprojects/frida-gum -name gummemory.c -exec \
-            sed -i 's/PROT_READ | PROT_WRITE | PROT_EXEC/PROT_READ | PROT_WRITE/g' {} \;
+          # 线程名 / server / agent
+          find subprojects -type f -name "*.c" -o -name "*.vala" -exec sed -i \
+            -e 's/"gum-js-loop"/"pool"/g' \
+            -e 's/"gmain"/"system"/g' \
+            -e 's/"gdbus"/"service"/g' \
+            -e 's/frida-agent/myagent/g' \
+            -e 's/frida-helper/myhelper/g' \
+            -e 's/frida-server/mt/g' \
+            {} \;
 
-          # ===== 可选：隐藏 agent/helper =====
-          find subprojects/frida-core -name "*.c" -exec sed -i 's/frida-agent/myagent/g' {} \;
-          find subprojects/frida-core -name "*.c" -exec sed -i 's/frida-helper/myhelper/g' {} \;
+          # D-Bus 路径
+          find subprojects -type f -exec sed -i \
+            's#/re/frida/#/re/myapp/#g' {} \;
 
-      # ✅ 编译（真正可用）
-      - name: Build Frida Server (Android ARM64)
+          # 默认端口
+          find subprojects -type f -exec sed -i \
+            's/27042/52222/g' {} \;
+
+          # RWX 内存隐藏
+          find subprojects/frida-gum -name gummemory.c -exec sed -i \
+            's/PROT_EXEC|PROT_WRITE/PROT_WRITE/g' {} \;
+
+          echo "[+] Patch Done"
+
+      # 🔥 编译（关键修复点）
+      - name: Build Frida (Android ARM64)
         run: |
           cd frida
 
-          export ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT
+          export ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}
           export PATH=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
 
-          python3 build.py build \
-            --configuration release \
-            --host=android-arm64
+          echo "[*] Configure build..."
 
-      # ✅ 输出确认
-      - name: List build output
+          # ⚠️ 正确方式：用 meson
+          meson setup build \
+            --cross-file subprojects/frida-core/releng/meson/android-arm64.txt \
+            --buildtype=release
+
+          echo "[*] Building..."
+
+          ninja -C build
+
+      # 📦 输出 frida-server
+      - name: Collect Artifacts
         run: |
-          ls -lh frida/build/
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: strongr-frida-server-android-arm64
-          path: frida/build/*

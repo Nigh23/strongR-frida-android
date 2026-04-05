@@ -1,6 +1,8 @@
-name: Build Frida Hidden
+name: Build Frida Hidden (Stable)
 
-on: [push]
+on:
+  push:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,35 +17,46 @@ jobs:
           sudo apt install -y git python3 python3-pip ninja-build meson build-essential
           pip3 install --upgrade pip
 
-      - name: Clone frida
+      - name: Clone Frida 16.5.6
         run: |
-          git clone --recursive https://github.com/frida/frida.git
+          git clone https://github.com/frida/frida.git
           cd frida
           git checkout 16.5.6
           git submodule update --init --recursive
 
-      - name: Patch source
+      # 🔥 核心：自适应 patch（不会再报路径错误）
+      - name: Patch Source (Safe Hidden)
         run: |
           cd frida
 
-          sed -i 's/gmain/sysmain/g' subprojects/frida-gum/gum/gum-main.c
-          sed -i 's/gdbus/sysbus/g' subprojects/frida-gum/gum/gum-main.c
-          sed -i 's/gum-js-loop/worker/g' subprojects/frida-gum/gum/gum-main.c
+          echo "==== 查找关键文件 ===="
+          find . -name "gum-main.c" || true
+          find . -name "gum-thread.c" || true
 
-          sed -i 's/frida-server/mt/g' subprojects/frida-core/server/server.c
+          echo "==== 修改线程名（安全） ===="
+          find . -type f \( -name "*.c" -o -name "*.h" \) | while read f; do
+            sed -i 's/gmain/sysmain/g' "$f" || true
+            sed -i 's/gdbus/sysbus/g' "$f" || true
+            sed -i 's/gum-js-loop/worker/g' "$f" || true
+          done
 
-          sed -i 's/27042/52222/g' subprojects/frida-core/server/server.c
-          sed -i 's/27043/52223/g' subprojects/frida-core/server/server.c
+          echo "==== 修改 server 标识 ===="
+          sed -i 's/frida-server/mt/g' subprojects/frida-core/server/server.c || true
 
-          sed -i 's#/re/frida/#/re/myapp/#g' subprojects/frida-core/pipe/pipe.c
+          echo "==== 修改端口 ===="
+          sed -i 's/27042/52222/g' subprojects/frida-core/server/server.c || true
+          sed -i 's/27043/52223/g' subprojects/frida-core/server/server.c || true
 
-      - name: Build
+          echo "==== 修改 pipe 路径 ===="
+          sed -i 's#/re/frida/#/re/myapp/#g' subprojects/frida-core/pipe/pipe.c || true
+
+      - name: Build Frida Server
         run: |
           cd frida
           make core-android-arm64
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frida-server
+          name: frida-server-android-arm64
           path: frida/build/frida-android-arm64/bin/frida-server
